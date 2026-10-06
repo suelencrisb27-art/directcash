@@ -1,0 +1,51 @@
+name: Atualizar DirectCA$H
+on:
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: CÃ³digo da atualizaÃ§Ã£o recebido no Club
+        required: true
+        default: editor-2026-10-02
+        type: string
+permissions:
+  contents: write
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Baixar versÃ£o aprovada
+        env:
+          RELEASE: ${{ inputs.versao }}
+        run: |
+          [[ "$RELEASE" =~ ^editor-[0-9]{4}-[0-9]{2}-[0-9]{2}(-r[1-9][0-9]*)?$ ]] || { echo 'CÃ³digo de atualizaÃ§Ã£o invÃ¡lido'; exit 1; }
+          curl --fail --location --retry 2 "https://github.com/rhaianebarreto/directcash/archive/refs/tags/$RELEASE.tar.gz" -o "$RUNNER_TEMP/directcash.tar.gz"
+          mkdir -p "$RUNNER_TEMP/directcash-update"
+          tar -xzf "$RUNNER_TEMP/directcash.tar.gz" -C "$RUNNER_TEMP/directcash-update" --strip-components=1
+      - name: Atualizar preservando a instalaÃ§Ã£o
+        run: |
+          test -f wrangler.jsonc
+          for folder in src public scripts migrations; do mkdir -p "$folder"; cp -R "$RUNNER_TEMP/directcash-update/$folder/." "$folder/"; done
+          cp "$RUNNER_TEMP/directcash-update/package.json" "$RUNNER_TEMP/directcash-update/package-lock.json" .
+          node scripts/update-config.mjs
+      - name: Confirmar remoÃ§Ã£o do limite antigo
+        run: |
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          const source=readFileSync('src/index.ts','utf8');
+          if(source.includes('Limite desta ediÃ§Ã£o: 30 automaÃ§Ãµes'))throw Error('Esta versÃ£o ainda contÃ©m o limite antigo. Use editor-2026-10-02 ou uma versÃ£o posterior.');
+          console.log('Verificado: servidor sem a trava antiga de 30 automaÃ§Ãµes.');
+          NODE
+      - name: Salvar atualizaÃ§Ã£o
+        run: |
+          git config user.name 'DirectCA$H Updates'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src public scripts migrations package.json package-lock.json wrangler.jsonc
+          if git diff --cached --quiet; then echo 'Esta instalaÃ§Ã£o jÃ¡ usa esta versÃ£o.'; exit 0; fi
+          git commit -m 'Atualizar editor visual do DirectCA$H'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
